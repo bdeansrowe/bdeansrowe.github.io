@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Face Finder</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 20px; }
+
+    .doit {
+      height: 48px;
+      width: 144px;
+      border-radius: 6px;
+      border-color: rgba(28, 6, 118, 0.5);
+      background: rgba(28, 6, 118, 0.15);
+    }
+
+    .doit:hover {
+      border-color: rgba(28, 6, 118, 0.8);
+      background: rgba(28, 6, 118, 0.25);
+    }
+
+    .center {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 96px;
+    }
+
+    .wonder {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 480px;
+    }
+
+    .beauty {
+      padding: 40px;
+      justify-content: center;
+      align-items: center;
+      height: 400px;
+      width: 400px;
+      border: 4px solid rgba(7, 157, 10, 0.535);
+      border-radius: 12px;
+      background: rgba(7, 157, 10, 0.05);
+    }
+
+    .drop-zone {
+      border: 2px dashed rgba(28, 6, 118, 0.3);
+      border-radius: 12px;
+      padding: 6px;
+      text-align: center;
+      background: rgba(28, 6, 118, 0.05);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-top: 10px;
+    }
+
+    .drop-zone:hover {
+      border-color: rgba(28, 6, 118, 0.5);
+      background: rgba(28, 6, 118, 0.1);
+    }
+
+    .drop-zone.dragover {
+      border-color: rgb(0, 122, 255);
+      background: rgba(0, 122, 255, 0.15);
+    }
+  </style>
+</head>
+<body>
+<h1>Brian's Face Finder</h1>
+<h3>Given</h3>
+
+<ul>
+  <li>A set of vertices connected by edges in the plane</li>
+  <li>The edges do not intersect except at their endpoints</li>
+  <li>Together, they form a collection of closed polygons</li>
+  <li>The edges form a connected component</li>
+</ul>
+
+<h3>Task</h3>
+<p>Write an algorithm that finds all of the interior faces (polygons) of such a data structure</p>
+
+<div id="drop-zone" class="drop-zone">
+  <p>Drop JSON data-file here<br>
+  (or click to browse)</p>
+    
+  <input id="input" type="file" accept=".json" style="display: none;">
+</div>
+
+<h3>Data</h3>
+<p id="data"></p>
+
+<div class="center">
+  <button class="doit" id="do_the_thing" title="Do It">Find and Display Interior Faces</button>
+</div>
+
+<div class="results">
+  <h3>Result</h3>
+  <p id="result"></p>
+</div>
+
+<div class="wonder">
+  <div class="beauty">
+    <canvas
+      id="showit"
+      width= "400"
+      height= "400"
+      >
+    </canvas>
+  </div>
+</div>
+
+<script type="module">
+
+  // convenient and elicidating array indexers for point and vector arrays
+  const X = 0;
+  const Y = 1;
+  const Z = 2;
+
+  var json_data;
+  var vertices = [];
+  var edges = [];
+
+  function half_edges_from_edge(edges, edge, edex) {
+    edges.push({
+      hedge: [edge[0], edge[1]],
+      twin: 2*edex+1
+    });
+    edges.push({
+      hedge: [edge[1], edge[0]],
+      twin: 2*edex
+    });
+
+    return edges;
+  }
+
+  // uses 'z' component of the cross-product of two planar 2D vectors
+  // the sign distingish between front-facing and back-facing faces
+  // positive is front-facing, negative is back-facing
+  function facing(f, verticies) {
+    // vector between face[0] and face[1]
+    let v1 = [
+      verticies[f[1]][X] - verticies[f[0]][X],
+      verticies[f[1]][Y] - verticies[f[0]][Y],
+    ];
+
+    // vector between face[1] and face[2]
+    let v2 = [
+      verticies[f[2]][X] - verticies[f[1]][X],
+      verticies[f[2]][Y] - verticies[f[1]][Y],
+    ];
+
+    return ((v1[X] * v2[Y]) - (v1[Y] * v2[X]));
+  }
+
+  // add an array of indicies for the outgoing hedges per vertex
+  // and a matching array of the CCW angles of the edges calculated using atan2()
+  function add_outgoing_hedges(hedges) {
+    return function hedges_adder(vert_plus, vertex, idx, vertices) {
+      const outgoing = hedges.reduce((outgoing, hedge, hdex) => {
+        if (hedge.hedge[0] == idx) {
+          outgoing.push(hdex);
+        }
+        return outgoing},[]);
+      const with_angles = outgoing.map((hidx) => {
+        return {
+          hedge: hidx,
+          angle: Math.atan2(vertices[hedges[hidx].hedge[1]][Y] - vertex[Y],
+                    vertices[hedges[hidx].hedge[1]][X] - vertex[X]),
+          }
+      });
+      vert_plus.push({
+        vertex: vertex,
+        outgoing: with_angles
+      });
+      return vert_plus;
+    }
+  }
+
+  function doit() {
+    // create a list of half edges from the list of edges also noting twins
+    const hedges = edges.reduce(half_edges_from_edge,[]);
+
+    // build lists, per vertex, of outgoing edges with angles
+    const vertex_edges = vertices.reduce(add_outgoing_hedges(hedges),[]);
+    
+    // sort outgoing edge-lists counter-clockwise by angle
+    vertex_edges.forEach((v) => {
+      v.outgoing.sort((a, b) => {return a.angle - b.angle});
+    });
+
+    const all_faces = [];
+    // walk the half-edge list to build faces
+    hedges.forEach((h, hidx, hedges) => {
+      // skip previously visited hedges
+      if (h.visited) return;
+
+      // the hedge's startpoint is the first point in the new face
+      const face = [h.hedge[0]];
+      var next = h;
+      do {
+        // mark hedges as having been visited while progressing
+        next.visited = true;
+
+        // add the endpoint of the current hedge to the list of the face's points
+        face.push(next.hedge[1]);
+
+        // start finding the 'next' hedge by using the hedge's twin
+        //
+        // find the index of twin's outgoing hedge that has its endpoint matching
+        // the startpoint of this hedge
+        var twin = next.twin;
+        var twindex = vertex_edges[next.hedge[1]].outgoing.findIndex((he) => {
+          return he.hedge == twin;
+        });
+
+        // the hedge previous to the twin's hedge is the next outgoing hedge to follow
+        // because of CCW angle sorting
+        var last = vertex_edges[next.hedge[1]].outgoing.length - 1;
+        next = (twindex == 0) ? hedges[vertex_edges[next.hedge[1]].outgoing[last].hedge]
+                              : hedges[vertex_edges[next.hedge[1]].outgoing[twindex - 1].hedge];
+        // stop when the walk returns to the starting point
+      } while (next.hedge[1] != face[0]);
+      next.visited = true; // last hedge visited doesn't contribute to the face but
+                           // must be marked as visited
+
+      // add the completed face to the list of faces
+      all_faces.push(face);
+    });
+
+    // when all hedges have been visited, all faces both interior and exterior
+    // have been found
+    // find and remove the backfacing exterior-face that wraps all interior-faces
+    const interior_faces = all_faces.filter((f) => {return facing(f, vertices) >= 0} );
+
+    // show the set of interior faces in the Results section of the page
+    let faces = "Faces<br>";
+    interior_faces.forEach((f, idx) => {
+      faces += "f" + idx.toString() + ": " + f.toString() + "<br>";
+
+    });
+    document.getElementById("result").innerHTML = faces;
+
+    // draw the polygon in the Result:showit section of the page
+    var canvas = document.getElementById("showit");
+    var ctx = canvas.getContext("2d");
+
+    // find dimensions of bounding rectangle of the polygons
+    var max_x = interior_faces.reduce((max, f) => {
+      return Math.max(max, f.reduce((max, v) => {return Math.max(max, vertices[v][X])}, -Infinity))}, -Infinity);
+    var max_y = interior_faces.reduce((max, f) => {
+      return Math.max(max, f.reduce((max, v) => {return Math.max(max, vertices[v][Y])}, -Infinity))}, -Infinity);
+
+    var min_x = interior_faces.reduce((min, f) => {
+      return Math.min(min, f.reduce((min, v) => {return Math.min(min, vertices[v][X])}, Infinity))}, Infinity);
+    var min_y = interior_faces.reduce((min, f) => {
+      return Math.min(min, f.reduce((min, v) => {return Math.min(min, vertices[v][Y])}, Infinity))}, Infinity);
+
+    var point_scalar = 400 / Math.min(max_x - min_x, max_y - min_y);
+    var n_colours = interior_faces.length +1;
+
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "black";
+    interior_faces.forEach((f, fidx) => {
+      ctx.beginPath();
+      ctx.fillStyle = "rgb(128 " + 255*(fidx+1)/n_colours + " 128)";
+      f.forEach((v, idx) => {
+        if (idx == 0) ctx.moveTo(point_scalar * vertices[v][X], point_scalar * vertices[v][Y]);
+        else ctx.lineTo(point_scalar * vertices[v][X], point_scalar * vertices[v][Y]);
+      });
+      ctx.closePath();
+      // ctx.lineTo(point_scalar * vertices[f[0]][X], point_scalar * vertices[f[0]][Y]); // close the polygon
+      ctx.fill();
+      ctx.stroke();
+    });
+
+  }
+
+  // event listener for the 'doit' button
+  const do_the_thing = document.getElementById("do_the_thing");
+  do_the_thing.addEventListener('click', () => doit());
+
+  // set up a drop-zone to allow either browsing for a data-file or drag/dropping one
+  // not originally my code
+  // had it lying around from an older project and modified here to suit
+  const drop_zone = document.getElementById("drop-zone");
+  const file_input = document.getElementById("input");
+
+  // event listener to browse for the data file
+  drop_zone.addEventListener('click', () => file_input.click());
+    
+  // event listeners to manage drag/drop
+  drop_zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    drop_zone.classList.add('dragover');
+  });
+  
+  drop_zone.addEventListener('dragleave', () => {
+    drop_zone.classList.remove('dragover');
+  });
+  
+  drop_zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop_zone.classList.remove('dragover');
+    
+    const file = e.dataTransfer.files[0];
+    if (file) load_json(file);
+  });
+    
+  file_input.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) load_json(file);
+  });
+  
+function load_json(file) {
+  const reader = new FileReader();
+  
+  reader.onload = (e) => {
+    try {
+      json_data = e.target.result;
+      const tope_data = JSON.parse(json_data);
+
+      let data = "Vertices: ";
+      tope_data["vertices"].forEach((v) => {data += "[" + v.toString() + "] "});
+      data += "<br>Edges: ";
+      tope_data["edges"].forEach((e) => {data += "[" + e.toString() + "] "});
+      data += "<br>"
+      document.getElementById("data").innerHTML = data;
+
+      vertices = tope_data["vertices"];
+      edges = tope_data["edges"];
+
+    } catch (err) {
+      console.error('json parse error:', err);
+    }
+  };
+  
+  reader.readAsText(file);
+}
+
+</script>
+</body>
+</html>
